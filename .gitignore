@@ -4,8 +4,14 @@
 *.so
 *.dylib
 
+# Delve debug binaries
+debug
+
 # Test binary, build with `go test -c`
 *.test
+
+# vscode launch files
+.vscode/*
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
