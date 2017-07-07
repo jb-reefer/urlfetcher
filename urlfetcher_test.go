@@ -33,9 +33,15 @@ func TestIgnoreCaseMatching(t *testing.T) {
 	}
 }
 
-// func TestIgnoreCaseMatching(*testing.T) {}
-// func TestIgnoreCaseMatching(*testing.T) {}
-// func TestIgnoreCaseMatching(*testing.T) {}
-// func TestIgnoreCaseMatching(*testing.T) {}
-// func TestIgnoreCaseMatching(*testing.T) {}
-// func TestIgnoreCaseMatching(*testing.T) {}
+func TestIgnoreFunkyCaseMatching(t *testing.T) {
+	testCorpus := "Some text to search"
+	searchText := "TeXt"
+
+	var matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+
+	start, _ := matcher.IndexString(testCorpus, searchText)
+
+	if start == -1 {
+		t.Errorf("Expected to find %v in %v, instead found start index %v", searchText, testCorpus, start)
+	}
+}

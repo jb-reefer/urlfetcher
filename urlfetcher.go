@@ -1,9 +1,13 @@
 package urlfetcher
 
 import (
+	"encoding/csv"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+
+	"os"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/search"
@@ -11,25 +15,50 @@ import (
 
 func main() {
 
-	// TODO: take flags in from the args with /flags package
-	// TODO: write function that takes a URL and a term, and searches for a value
-	// TODO: write function that searches for a value
+	var urlFilename = flag.String("file", "urls.txt", "CSV formatted file containg urls")
+	var term = flag.String("query", "test", "Search word/phrase in webpages")
+
+	file, err := os.Open(*urlFilename)
+
+	if err != nil {
+		fmt.Printf("Error when attempting to open file %v:", urlFilename)
+		fmt.Print(err)
+		return
+	}
+
+	csvReader := csv.NewReader(file)
+	fileData, err := csvReader.ReadAll()
+
+	if err != nil {
+		fmt.Printf("Error when attempting to read file %v:", urlFilename)
+		fmt.Print(err)
+		return
+	}
+
+	// TODO: run 20 of these concurrently
+	for _, record := range fileData {
+
+		searchURLForTerm(record[0], term)
+
+	}
+}
+
+func searchURLForTerm(url string, term *string) bool {
 
 	response, webError := http.Get("https://www.example.com")
 
 	if webError != nil {
 		fmt.Print(webError)
-		return
+		return false
 	}
 
 	defer response.Body.Close()
 
 	body, _ := ioutil.ReadAll(response.Body)
 
-	fmt.Println(body)
-
 	var matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
 
-	matcher.IndexString("term", "corpus")
+	start, _ := matcher.Index(body, []byte(*term))
 
+	return start != -1
 }
