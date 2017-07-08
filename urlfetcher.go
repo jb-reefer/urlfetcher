@@ -6,29 +6,28 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-
 	"os"
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/search"
 )
 
-type FindResult struct {
-	FoundMatch bool
-	URL        string
-}
-
-var matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+var (
+	matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+	term    = flag.String("query", "test", "Search word/phrase in webpages")
+)
 
 func main() {
 
 	var urlFilename = flag.String("file", "urls.txt", "CSV formatted file containg urls")
-	var term = flag.String("query", "test", "Search word/phrase in webpages")
+	var threads = flag.Int("threads", 20, "Number of threads to use")
+
+	flag.Parse()
 
 	file, err := os.Open(*urlFilename)
 
 	if err != nil {
-		fmt.Printf("Error when attempting to open file %v:\n", urlFilename)
+		fmt.Printf("Error when attempting to open file %v:\n", *urlFilename)
 		fmt.Println(err)
 		return
 	}
@@ -42,23 +41,33 @@ func main() {
 		return
 	}
 
-	response := make(chan FindResult, 20)
+	output := make(chan string)
 
-	// TODO: run 20 of these concurrently
+	// Spawn workers
+	for i := 0; i < *threads; i++ {
+		go searchWorker(output)
+	}
+
+	// Pump data into queue
 	for _, record := range fileData[1:] {
+		output <- record[1]
+	}
 
-		concurrentSearchForTerm(record[1], term, response)
+	fmt.Println("All URLs parsed, exiting.")
 
+	close(output)
+
+}
+
+func searchWorker(input chan string) {
+
+	// Grab urls off of the queue
+	for url := range input {
+		searchURLForTerm(url)
 	}
 }
 
-func concurrentSearchForTerm(url string, term *string, channel chan<- FindResult) {
-
-	channel <- searchURLForTerm(url, term)
-
-}
-
-func searchURLForTerm(url string, term *string) FindResult {
+func searchURLForTerm(url string) {
 
 	var address string
 
@@ -78,9 +87,16 @@ func searchURLForTerm(url string, term *string) FindResult {
 
 		if httpError != nil {
 
-			fmt.Print(httpError)
+			address = "http://www." + url
 
-			return FindResult{false, address}
+			var wwwError error
+			response, wwwError = http.Get(address)
+
+			if wwwError != nil {
+				fmt.Printf("Could not resolve %v\n", url)
+				return
+			}
+
 		}
 
 	}
@@ -91,5 +107,6 @@ func searchURLForTerm(url string, term *string) FindResult {
 	body, _ := ioutil.ReadAll(response.Body)
 	start, _ := matcher.Index(body, []byte(*term))
 
-	return FindResult{start != -1, address}
+	//return FindResult{start != -1, address}
+	fmt.Printf("Found: %t\tURL: %v\n", start != -1, address)
 }
