@@ -1,4 +1,4 @@
-package urlfetcher
+package main
 
 import (
 	"testing"

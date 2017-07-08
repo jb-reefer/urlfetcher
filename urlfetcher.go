@@ -1,4 +1,4 @@
-package urlfetcher
+package main
 
 import (
 	"encoding/csv"
@@ -13,6 +13,13 @@ import (
 	"golang.org/x/text/search"
 )
 
+type FindResult struct {
+	FoundMatch bool
+	URL        string
+}
+
+var matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+
 func main() {
 
 	var urlFilename = flag.String("file", "urls.txt", "CSV formatted file containg urls")
@@ -21,8 +28,8 @@ func main() {
 	file, err := os.Open(*urlFilename)
 
 	if err != nil {
-		fmt.Printf("Error when attempting to open file %v:", urlFilename)
-		fmt.Print(err)
+		fmt.Printf("Error when attempting to open file %v:\n", urlFilename)
+		fmt.Println(err)
 		return
 	}
 
@@ -30,35 +37,59 @@ func main() {
 	fileData, err := csvReader.ReadAll()
 
 	if err != nil {
-		fmt.Printf("Error when attempting to read file %v:", urlFilename)
-		fmt.Print(err)
+		fmt.Printf("Error when attempting to read file %v:\n", urlFilename)
+		fmt.Println(err)
 		return
 	}
 
-	// TODO: run 20 of these concurrently
-	for _, record := range fileData {
+	response := make(chan FindResult, 20)
 
-		searchURLForTerm(record[0], term)
+	// TODO: run 20 of these concurrently
+	for _, record := range fileData[1:] {
+
+		concurrentSearchForTerm(record[1], term, response)
 
 	}
 }
 
-func searchURLForTerm(url string, term *string) bool {
+func concurrentSearchForTerm(url string, term *string, channel chan<- FindResult) {
 
-	response, webError := http.Get("https://www.example.com")
+	channel <- searchURLForTerm(url, term)
 
-	if webError != nil {
-		fmt.Print(webError)
-		return false
+}
+
+func searchURLForTerm(url string, term *string) FindResult {
+
+	var address string
+
+	if url[0:3] != "http" {
+		address = "https://" + url
+	}
+
+	response, httpsError := http.Get(address)
+
+	// http.Get doesn't detect proto automatically, so try tls and non-tls
+	if httpsError != nil {
+
+		address = "http://" + url
+
+		var httpError error
+		response, httpError = http.Get(address)
+
+		if httpError != nil {
+
+			fmt.Print(httpError)
+
+			return FindResult{false, address}
+		}
+
 	}
 
 	defer response.Body.Close()
 
+	// TODO: this error handling
 	body, _ := ioutil.ReadAll(response.Body)
-
-	var matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
-
 	start, _ := matcher.Index(body, []byte(*term))
 
-	return start != -1
+	return FindResult{start != -1, address}
 }
