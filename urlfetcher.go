@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -8,17 +9,31 @@ import (
 	"net/http"
 	"os"
 
+	"sync"
+
 	"golang.org/x/text/language"
 	"golang.org/x/text/search"
 )
 
 var (
-	matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
 	term    = flag.String("query", "test", "Search word/phrase in webpages")
+	matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+	wait    = sync.WaitGroup{}
 )
+
+// FindResult Results object from worker threads
+type FindResult struct {
+	FoundMatch bool
+	URL        string
+}
+
+func (result FindResult) String() string {
+	return fmt.Sprintf("Found: %t\tURL: %v\n", result.FoundMatch, result.URL)
+}
 
 func main() {
 
+	// Load and parse file
 	var urlFilename = flag.String("file", "urls.txt", "CSV formatted file containg urls")
 	var threads = flag.Int("threads", 20, "Number of threads to use")
 
@@ -41,64 +56,72 @@ func main() {
 		return
 	}
 
-	output := make(chan string)
+	// Create workers and process workload
+	urlQueue := make(chan string)
+	results := make(chan FindResult)
 
 	// Spawn workers
 	for i := 0; i < *threads; i++ {
-		go searchWorker(output)
+		go searchWorker(urlQueue, results)
 	}
 
 	// Pump data into queue
 	for _, record := range fileData[1:] {
-		output <- record[1]
+		urlQueue <- record[1]
 	}
+
+	// Await and read out results
+	wait.Wait()
+	close(urlQueue)
+
+	var buffer bytes.Buffer
+
+	for result := range results {
+		buffer.WriteString(result.String())
+		buffer.WriteString("\n")
+
+	}
+
+	close(results)
+
+	ioutil.WriteFile("results.txt", buffer.Bytes(), 0644)
 
 	fmt.Println("All URLs parsed, exiting.")
 
-	close(output)
-
 }
 
-func searchWorker(input chan string) {
+func searchWorker(input chan string, output chan FindResult) {
 
 	// Grab urls off of the queue
 	for url := range input {
-		searchURLForTerm(url)
+		wait.Add(1)
+		output <- searchURLForTerm(url)
+		wait.Done()
 	}
 }
 
-func searchURLForTerm(url string) {
+func searchURLForTerm(url string) FindResult {
 
 	var address string
 
 	if url[0:3] != "http" {
-		address = "https://" + url
+		address = "http://" + url
 	}
 
-	response, httpsError := http.Get(address)
+	response, httpError := http.Get(address)
 
 	// http.Get doesn't detect proto automatically, so try tls and non-tls
-	if httpsError != nil {
+	if httpError != nil {
 
-		address = "http://" + url
+		address = "http://www." + url
 
-		var httpError error
-		response, httpError = http.Get(address)
+		var wwwError error
+		response, wwwError = http.Get(address)
 
-		if httpError != nil {
-
-			address = "http://www." + url
-
-			var wwwError error
-			response, wwwError = http.Get(address)
-
-			if wwwError != nil {
-				fmt.Printf("Could not resolve %v\n", url)
-				return
-			}
-
+		if wwwError != nil {
+			fmt.Printf("Could not resolve %v:\t%v\n", url, wwwError)
+			return FindResult{false, address}
 		}
-
 	}
 
 	defer response.Body.Close()
@@ -107,6 +130,7 @@ func searchURLForTerm(url string) {
 	body, _ := ioutil.ReadAll(response.Body)
 	start, _ := matcher.Index(body, []byte(*term))
 
-	//return FindResult{start != -1, address}
-	fmt.Printf("Found: %t\tURL: %v\n", start != -1, address)
+	result := FindResult{start != -1, address}
+	fmt.Print(result)
+	return result
 }
