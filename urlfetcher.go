@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-
 	"sync"
 
 	"golang.org/x/text/language"
