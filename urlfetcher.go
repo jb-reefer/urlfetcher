@@ -16,25 +16,24 @@ import (
 )
 
 var (
-	term        = flag.String("query", "test", "Search word/phrase in webpages")
-	urlFilename = flag.String("file", "urls.txt", "CSV formatted file containg urls")
-	threads     = flag.Int("threads", 20, "Number of threads to use")
-
-	matcher = search.New(language.AmericanEnglish, search.IgnoreCase)
-	wait    = sync.WaitGroup{}
+	searcher = search.New(language.AmericanEnglish, search.IgnoreCase)
+	wait     = sync.WaitGroup{}
 )
 
-// FindResult for a given term in webpage at URL
-type FindResult struct {
+type findResult struct {
 	FoundMatch bool
 	URL        string
 }
 
-func (result FindResult) String() string {
+func (result findResult) String() string {
 	return fmt.Sprintf("Found: %t\tURL: %v", result.FoundMatch, result.URL)
 }
 
 func main() {
+
+	query := flag.String("query", "test", "Search word/phrase in webpages")
+	urlFilename := flag.String("file", "urls.txt", "CSV formatted file containg urls")
+	threads := flag.Int("threads", 20, "Number of threads to use")
 
 	// Load and parse file
 	flag.Parse()
@@ -58,11 +57,11 @@ func main() {
 
 	// Create workers and process workload
 	urlQueue := make(chan string)
-	results := make(chan FindResult, len(fileData))
+	results := make(chan findResult, len(fileData))
 
 	// Spawn workers
 	for i := 0; i < *threads; i++ {
-		go searchWorker(urlQueue, results)
+		go searchWorker(urlQueue, results, *query)
 	}
 
 	// Pump data into queue
@@ -79,15 +78,9 @@ func main() {
 
 	fmt.Println("Reading results...")
 
-	i := 1
-
 	for result := range results {
-		fmt.Println(result)
-		fmt.Println(i)
-		i++
 		buffer.WriteString(result.String())
 		buffer.WriteString("\n")
-
 	}
 
 	fmt.Println("Read all results.")
@@ -104,38 +97,44 @@ func main() {
 
 }
 
-func searchWorker(input chan string, output chan<- FindResult) {
+func searchWorker(input chan string, output chan<- findResult, query string) {
 
 	// Grab urls off of the queue
 	for url := range input {
 		wait.Add(1)
-		output <- searchURLForTerm(url)
+		output <- searchURLForTerm(url, query)
 		wait.Done()
 	}
 }
 
-func searchURLForTerm(url string) FindResult {
+func getBody(url string) (*http.Response, error) {
 
 	var address string
 
+	// Input strings aren't always dialable, so try a few different forms
 	if url[0:3] != "http" {
 		address = "http://" + url
 	}
 
-	response, httpError := http.Get(address)
+	response, requestError := http.Get(address)
 
-	// http.Get doesn't detect proto automatically, so try tls and non-tls
-	if httpError != nil {
+	if requestError != nil {
 
 		address = "http://www." + url
 
-		var wwwError error
-		response, wwwError = http.Get(address)
+		response, requestError = http.Get(address)
+	}
 
-		if wwwError != nil {
-			//fmt.Printf("Could not resolve %v:\t%v\n", url, wwwError)
-			return FindResult{false, url}
-		}
+	return response, requestError
+}
+
+func searchURLForTerm(url string, query string) findResult {
+
+	response, err := getBody(url)
+
+	if err != nil {
+		fmt.Printf("Could not resolve %v:\t%v\n", url, err)
+		return findResult{false, url}
 	}
 
 	defer response.Body.Close()
@@ -144,9 +143,9 @@ func searchURLForTerm(url string) FindResult {
 
 	if readErr != nil {
 		fmt.Printf("Could not read body for page %v, got error:%v\n", url, readErr)
-		return FindResult{false, url}
+		return findResult{false, url}
 	}
 
-	start, _ := matcher.Index(body, []byte(*term))
-	return FindResult{start != -1, address}
+	start, _ := searcher.Index(body, []byte(query))
+	return findResult{start != -1, url}
 }
